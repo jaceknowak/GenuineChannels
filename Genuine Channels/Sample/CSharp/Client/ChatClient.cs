@@ -1,13 +1,19 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Configuration;
+using System.Net;
 using System.Runtime.Remoting;
+using System.Runtime.Remoting.Channels;
+using System.Security.Principal;
 using System.Threading;
-
-using KnownObjects;
 using Belikov.GenuineChannels;
-using Belikov.GenuineChannels.BroadcastEngine;
+using Belikov.GenuineChannels.GenuineTcp;
+using Belikov.GenuineChannels.Security;
+using Belikov.GenuineChannels.Security.SSPI;
+using Belikov.GenuineChannels.TransportContext;
+using KnownObjects;
 using Belikov.GenuineChannels.DotNetRemotingLayer;
-using Belikov.GenuineChannels.Logbook;
 
 namespace Client
 {
@@ -41,6 +47,34 @@ namespace Client
 		/// </summary>
 		public static object IChatServerLock = new object();
 
+	    private const string SessionName = "SESSION";
+
+        private static void SetCredentials(ITransportContextProvider iContextProvider, NetworkCredential userCredential, string targetName)
+        {
+            if (iContextProvider != null)
+            {
+                ITransportContext transportContext = iContextProvider.ITransportContext;
+                var keyProvider = (KeyProvider_SspiClient)transportContext.IKeyStore.GetKey(SessionName);
+                keyProvider.AuthIdentity = userCredential;
+                keyProvider.ServerName = targetName;
+
+                SetSecuritySessionParameters(transportContext);
+            }
+        }
+
+        private static SecuritySessionAttributes GetExistingAttributes(SecuritySessionParameters parameters)
+        {
+            return (parameters != null) ? parameters.Attributes : SecuritySessionAttributes.None;
+        }
+
+        private static void SetSecuritySessionParameters(ISetSecuritySession context)
+        {
+            SecuritySessionAttributes existingAttributes = GetExistingAttributes(context.SecuritySessionParameters);
+            context.SecuritySessionParameters = new SecuritySessionParameters(SessionName, existingAttributes, TimeSpan.MinValue);
+        }
+
+        private const string TargetServerName = "127.0.0.1";
+
 		/// <summary>
 		/// The main entry point for the application.
 		/// </summary>
@@ -56,7 +90,22 @@ namespace Client
 			System.Configuration.ConfigurationSettings.GetConfig("DNS");
 			GenuineGlobalEventProvider.GenuineChannelsGlobalEvent += new GenuineChannelsGlobalEventHandler(GenuineChannelsEventHandler);
 			//GlobalLoggerContainer.Logger = new BinaryLog(@"c:\tmp\client.log", false);
-			RemotingConfiguration.Configure("Client.exe.config");
+			//// RemotingConfiguration.Configure("Client.exe.config");
+
+            IDictionary props = new Hashtable();
+            props["name"] = "gtcp";
+            props["priority"] = "100";
+
+            BinaryServerFormatterSinkProvider srv = new BinaryServerFormatterSinkProvider();
+            BinaryClientFormatterSinkProvider clnt = new BinaryClientFormatterSinkProvider();
+            GenuineTcpChannel channel = new GenuineTcpChannel(props, clnt, srv);
+            ChannelServices.RegisterChannel(channel);
+
+            //KeyProvider_SspiClient keyProvider_SspiClient = new KeyProvider_SspiClient(SspiFeatureFlags.None, SupportedSspiPackages.NTLM, null, string.Empty);
+            //SecuritySessionServices.SetGlobalKey(SessionName, keyProvider_SspiClient);
+            //ITransportContextProvider iTcpProvider = (ITransportContextProvider) ChannelServices.GetChannel("gtcp");
+            //IIdentity identity = WindowsIdentity.GetCurrent();
+            //SetCredentials(iTcpProvider, null, TargetServerName);
 
 			Console.WriteLine(".NET Remoting has been configured from Client.exe.config file.");
 

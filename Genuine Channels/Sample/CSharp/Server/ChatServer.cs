@@ -2,14 +2,12 @@ using System;
 using System.Collections;
 using System.Runtime.Remoting;
 using System.Runtime.Remoting.Channels;
-using System.Runtime.Remoting.Lifetime;
-using System.Runtime.Remoting.Messaging;
-
+using Belikov.GenuineChannels.GenuineHttp;
+using Belikov.GenuineChannels.Security;
+using Belikov.GenuineChannels.Security.SSPI;
 using KnownObjects;
 using Belikov.GenuineChannels;
-using Belikov.GenuineChannels.BroadcastEngine;
 using Belikov.GenuineChannels.DotNetRemotingLayer;
-using Belikov.GenuineChannels.Logbook;
 
 namespace Server
 {
@@ -31,7 +29,20 @@ namespace Server
 				System.Configuration.ConfigurationSettings.GetConfig("DNS");
 				GenuineGlobalEventProvider.GenuineChannelsGlobalEvent += new GenuineChannelsGlobalEventHandler(GenuineChannelsEventHandler);
 				//GlobalLoggerContainer.Logger = new BinaryLog(@"c:\tmp\server.log", false);
-				RemotingConfiguration.Configure("Server.exe.config");
+
+				
+                ////RemotingConfiguration.Configure("Server.exe.config");
+                
+                IDictionary props = new Hashtable();
+                props["name"] = "gtcp";
+                props["priority"] = "100";
+			    props["port"] = "8737";
+                // Null entries specify the default formatters.
+                GenuineHttpServerChannel channel = new GenuineHttpServerChannel(props, null, null);
+                ChannelServices.RegisterChannel(channel);
+
+                KeyProvider_SspiServer keyProvider_SspiServer = new KeyProvider_SspiServer(SspiFeatureFlags.None, SupportedSspiPackages.NTLM);
+                SecuritySessionServices.SetGlobalKey("SESSION", keyProvider_SspiServer);
 
 				// bind the server
 				RemotingServices.Marshal(new ChatServer(), "ChatServer.rem");
@@ -53,7 +64,7 @@ namespace Server
 		/// <param name="e"></param>
 		public static void GenuineChannelsEventHandler(object sender, GenuineEventArgs e)
 		{
-			if (e.SourceException == null)
+		    if (e.SourceException == null)
 				Console.WriteLine("\r\n\r\n---Global event: {0}\r\nRemote host: {1}", 
 					e.EventType,
 					e.HostInformation == null ? "<unknown>" : e.HostInformation.ToString());
@@ -72,9 +83,6 @@ namespace Server
 			}
 		}
 
-		/// <summary>
-		/// This example was designed to have the only chat room.
-		/// </summary>
 		public static ChatRoom GlobalRoom = new ChatRoom();
 
 		/// <summary>
@@ -84,6 +92,17 @@ namespace Server
 		/// <returns>Chat room interface.</returns>
 		public IChatRoom EnterToChatRoom(string nickname)
 		{
+            var remoteHost = GenuineUtility.CurrentRemoteHost;
+            if (remoteHost != null)
+            {
+                SecuritySession_SspiServer securitySession_SspiServer = remoteHost.GetSecuritySession(GenuineUtility.CurrentInvocationSecuritySessionParameters.Name, null) as SecuritySession_SspiServer;
+                if (securitySession_SspiServer != null)
+                {
+                    var id = securitySession_SspiServer.WindowsIdentity;
+                    Console.WriteLine(id.Name);
+                }
+            }
+
 			GlobalRoom.AttachClient(nickname);
 			GenuineUtility.CurrentSession["Nickname"] = nickname;
 			return GlobalRoom;
