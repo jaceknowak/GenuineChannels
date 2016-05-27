@@ -27,6 +27,8 @@ namespace KnownObjects
 		/// <param name="nickname">Nickname.</param>
 		/// <returns>Chat room interface.</returns>
 		IChatRoom EnterToChatRoom(string nickname);
+
+        string Test { get; }
 	}
 
 	/// <summary>

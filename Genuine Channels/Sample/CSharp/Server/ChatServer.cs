@@ -2,9 +2,11 @@ using System;
 using System.Collections;
 using System.Runtime.Remoting;
 using System.Runtime.Remoting.Channels;
-using Belikov.GenuineChannels.GenuineHttp;
+using Belikov.GenuineChannels.GenuineTcp;
+using Belikov.GenuineChannels.Parameters;
 using Belikov.GenuineChannels.Security;
 using Belikov.GenuineChannels.Security.SSPI;
+using Belikov.GenuineChannels.TransportContext;
 using KnownObjects;
 using Belikov.GenuineChannels;
 using Belikov.GenuineChannels.DotNetRemotingLayer;
@@ -31,18 +33,31 @@ namespace Server
 				//GlobalLoggerContainer.Logger = new BinaryLog(@"c:\tmp\server.log", false);
 
 				
-                ////RemotingConfiguration.Configure("Server.exe.config");
-                
+                //// RemotingConfiguration.Configure("Server.exe.config");
+
+                KeyProvider_SspiServer keyProvider_SspiServer = new KeyProvider_SspiServer(SspiFeatureFlags.Encryption | SspiFeatureFlags.Signing, SupportedSspiPackages.Negotiate);
+                ////SecuritySessionServices.SetGlobalKey("SESSION", keyProvider_SspiServer);
+
                 IDictionary props = new Hashtable();
                 props["name"] = "gtcp";
                 props["priority"] = "100";
 			    props["port"] = "8737";
                 // Null entries specify the default formatters.
-                GenuineHttpServerChannel channel = new GenuineHttpServerChannel(props, null, null);
-                ChannelServices.RegisterChannel(channel);
+                BinaryServerFormatterSinkProvider srv = new BinaryServerFormatterSinkProvider();
+                BinaryClientFormatterSinkProvider clnt = new BinaryClientFormatterSinkProvider();
+                GenuineTcpChannel channel = new GenuineTcpChannel(props, clnt, srv);
+                channel.ITransportContext.IKeyStore.SetKey("/TEST/SSPI1", keyProvider_SspiServer);			    
+                channel.ITransportContext.IParameterProvider[GenuineParameter.SecuritySessionForPersistentConnections] = "/TEST/SSPI1";
+                channel.ITransportContext.IParameterProvider[GenuineParameter.SecuritySessionForNamedConnections] = "/TEST/SSPI1";
+                channel.ITransportContext.IParameterProvider[GenuineParameter.SecuritySessionForInvocationConnections] = "/TEST/SSPI1";
+                keyStore = channel.ITransportContext.IKeyStore;
 
-                KeyProvider_SspiServer keyProvider_SspiServer = new KeyProvider_SspiServer(SspiFeatureFlags.None, SupportedSspiPackages.NTLM);
-                SecuritySessionServices.SetGlobalKey("SESSION", keyProvider_SspiServer);
+                ////GenuineUtility.CurrentRemoteHost.DestroySecuritySession("D");
+                SecuritySessionServices.SetGlobalKey("/TEST/SSPI1", keyProvider_SspiServer);
+                ChannelServices.RegisterChannel(channel, false);
+
+               //// WellKnownServiceTypeEntry WKSTE = new WellKnownServiceTypeEntry(typeof(ChatServer), "ChatServer.rem", WellKnownObjectMode.Singleton);
+               //// RemotingConfiguration.RegisterWellKnownServiceType(WKSTE);
 
 				// bind the server
 				RemotingServices.Marshal(new ChatServer(), "ChatServer.rem");
@@ -55,6 +70,8 @@ namespace Server
 				Console.WriteLine("Exception: {0}. Stack trace: {1}.", ex.Message, ex.StackTrace);
 			}
 		}
+
+	    private static IKeyStore keyStore;
 
 		/// <summary>
 		/// Catches Genuine Channels events and removes client session when
@@ -93,9 +110,10 @@ namespace Server
 		public IChatRoom EnterToChatRoom(string nickname)
 		{
             var remoteHost = GenuineUtility.CurrentRemoteHost;
+		    var session = GenuineUtility.CurrentInvocationSecuritySession.IsEstablished;
             if (remoteHost != null)
-            {
-                SecuritySession_SspiServer securitySession_SspiServer = remoteHost.GetSecuritySession(GenuineUtility.CurrentInvocationSecuritySessionParameters.Name, null) as SecuritySession_SspiServer;
+            { //// GenuineUtility.CurrentInvocationSecuritySessionParameters.Name
+                SecuritySession_SspiServer securitySession_SspiServer = remoteHost.GetSecuritySession(GenuineUtility.CurrentConnectionSecuritySession.Name, null) as SecuritySession_SspiServer;
                 if (securitySession_SspiServer != null)
                 {
                     var id = securitySession_SspiServer.WindowsIdentity;
@@ -103,12 +121,14 @@ namespace Server
                 }
             }
 
-			GlobalRoom.AttachClient(nickname);
-			GenuineUtility.CurrentSession["Nickname"] = nickname;
+			////GlobalRoom.AttachClient(nickname);
+			////GenuineUtility.CurrentSession["Nickname"] = nickname;
 			return GlobalRoom;
 		}
 
-		/// <summary>
+	    public string Test { get { return "abc"; } }
+
+	    /// <summary>
 		/// This is to insure that when created as a Singleton, the first instance never dies,
 		/// regardless of the expired time.
 		/// </summary>

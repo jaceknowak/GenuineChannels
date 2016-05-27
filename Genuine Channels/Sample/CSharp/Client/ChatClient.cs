@@ -8,7 +8,9 @@ using System.Runtime.Remoting.Channels;
 using System.Security.Principal;
 using System.Threading;
 using Belikov.GenuineChannels;
+using Belikov.GenuineChannels.Connection;
 using Belikov.GenuineChannels.GenuineTcp;
+using Belikov.GenuineChannels.Parameters;
 using Belikov.GenuineChannels.Security;
 using Belikov.GenuineChannels.Security.SSPI;
 using Belikov.GenuineChannels.TransportContext;
@@ -47,7 +49,7 @@ namespace Client
 		/// </summary>
 		public static object IChatServerLock = new object();
 
-	    private const string SessionName = "SESSION";
+        private const string SessionName = "/TEST/SSPI1";
 
         private static void SetCredentials(ITransportContextProvider iContextProvider, NetworkCredential userCredential, string targetName)
         {
@@ -73,7 +75,7 @@ namespace Client
             context.SecuritySessionParameters = new SecuritySessionParameters(SessionName, existingAttributes, TimeSpan.MinValue);
         }
 
-        private const string TargetServerName = "127.0.0.1";
+        private const string TargetServerName = "localhost"; // win2012r2-jacek
 
 		/// <summary>
 		/// The main entry point for the application.
@@ -85,10 +87,13 @@ namespace Client
 			Console.WriteLine("Sleep for 3 seconds.");
 			Thread.Sleep(TimeSpan.FromSeconds(3));
 
+            KeyProvider_SspiClient keyProvider_SspiClient = new KeyProvider_SspiClient(SspiFeatureFlags.Encryption | SspiFeatureFlags.Signing, SupportedSspiPackages.Negotiate, null, TargetServerName);
+            ////SecuritySessionServices.SetGlobalKey(SessionName, keyProvider_SspiClient);
+
 			// setup .NET Remoting
 			Console.WriteLine("Configuring Remoting environment...");
 			System.Configuration.ConfigurationSettings.GetConfig("DNS");
-			GenuineGlobalEventProvider.GenuineChannelsGlobalEvent += new GenuineChannelsGlobalEventHandler(GenuineChannelsEventHandler);
+			GenuineGlobalEventProvider.GenuineChannelsGlobalEvent += GenuineChannelsEventHandler;
 			//GlobalLoggerContainer.Logger = new BinaryLog(@"c:\tmp\client.log", false);
 			//// RemotingConfiguration.Configure("Client.exe.config");
 
@@ -99,21 +104,29 @@ namespace Client
             BinaryServerFormatterSinkProvider srv = new BinaryServerFormatterSinkProvider();
             BinaryClientFormatterSinkProvider clnt = new BinaryClientFormatterSinkProvider();
             GenuineTcpChannel channel = new GenuineTcpChannel(props, clnt, srv);
-            ChannelServices.RegisterChannel(channel);
-
-            //KeyProvider_SspiClient keyProvider_SspiClient = new KeyProvider_SspiClient(SspiFeatureFlags.None, SupportedSspiPackages.NTLM, null, string.Empty);
-            //SecuritySessionServices.SetGlobalKey(SessionName, keyProvider_SspiClient);
-            //ITransportContextProvider iTcpProvider = (ITransportContextProvider) ChannelServices.GetChannel("gtcp");
-            //IIdentity identity = WindowsIdentity.GetCurrent();
-            //SetCredentials(iTcpProvider, null, TargetServerName);
-
+            channel.ITransportContext.IKeyStore.SetKey(SessionName, keyProvider_SspiClient);
+            channel.ITransportContext.IParameterProvider[GenuineParameter.SecuritySessionForPersistentConnections] = "/TEST/SSPI1";
+            channel.ITransportContext.IParameterProvider[GenuineParameter.SecuritySessionForNamedConnections] = "/TEST/SSPI1";
+            channel.ITransportContext.IParameterProvider[GenuineParameter.SecuritySessionForInvocationConnections] = "/TEST/SSPI1";
+           // WellKnownServiceTypeEntry WKSTE = new WellKnownServiceTypeEntry(typeof(ChatClient), "MessageReceiver.rem", WellKnownObjectMode.Singleton);
+           // RemotingConfiguration.RegisterWellKnownServiceType(WKSTE);
+            
+            ////ITransportContextProvider iTcpProvider = (ITransportContextProvider) ChannelServices.GetChannel("gtcp");
+            IIdentity identity = WindowsIdentity.GetCurrent();
+            ////GenuineUtility.CurrentRemoteHost.DestroySecuritySession("D");
+            SetCredentials(channel, null, TargetServerName);
+            SecuritySessionServices.SetGlobalKey("/TEST/SSPI1", keyProvider_SspiClient);
+            ChannelServices.RegisterChannel(channel, false);
+		    
 			Console.WriteLine(".NET Remoting has been configured from Client.exe.config file.");
 
 			Console.WriteLine("Please enter a nickname:");
-			ChatClient.Nickname = Console.ReadLine();
+			Nickname = Console.ReadLine();
 
 			// bind client's receiver
-			RemotingServices.Marshal(ChatClient.Instance, "MessageReceiver.rem");
+			//// RemotingServices.Marshal(Instance, "MessageReceiver.rem");
+
+           ////SecuritySessionServices.SetCurrentSecurityContext ( new SecuritySessionParameters ("SESSION", SecuritySessionAttributes.ForceSync, TimeSpan.MinValue, GenuineConnectionType.Persistent, null, TimeSpan.FromMinutes(5) ) );
 
 			for(;;)
 			{
@@ -122,9 +135,22 @@ namespace Client
 					// subscribe to the chat event
 					lock(ChatClient.IChatServerLock)
 					{
-						ChatClient.IChatServer = (IChatServer) Activator.GetObject(typeof(IChatRoom),
-							ConfigurationSettings.AppSettings["RemoteHostUri"] + "/ChatServer.rem");
-						ChatClient.IChatRoom = ChatClient.IChatServer.EnterToChatRoom(ChatClient.Nickname);
+                        //// RemotingServices.Marshal((RemoteDataServer)serverInstance, "RemoteServer.rem");
+
+					    try
+					    {
+					        var cs =
+					            (IChatServer)
+					                Activator.GetObject(typeof (IChatServer),
+					                    ConfigurationSettings.AppSettings["RemoteHostUri"] + "/ChatServer.rem");
+					        var s = cs.Test;
+                            Console.WriteLine(s);
+					        ChatClient.IChatRoom = cs.EnterToChatRoom(ChatClient.Nickname);
+					    }
+					    catch (Exception ex)
+					    {
+					        Console.WriteLine(ex.StackTrace);
+					    }
 					}
 
 					for(;;)
